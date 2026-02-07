@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <title>Orbit Arena - Tournament Master</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        :root { --bg: #c8c8c8; --panel: #ffffff; }
+        body { margin: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', Tahoma, sans-serif; }
+        canvas { display: block; filter: contrast(1.1); }
+
+        .overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.7);
+            display: flex; align-items: center; justify-content: center; z-index: 1000;
+        }
+        .menu {
+            background: var(--panel); padding: 30px; border-radius: 15px;
+            width: 90%; max-width: 980px; max-height: 90vh; overflow-y: auto;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.6); text-align: center;
+            border: 5px solid #000;
+        }
+        .hidden { display: none !important; }
+
+        .grid-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; text-align: left; }
+        .setup-section { background: #eee; padding: 12px; border-radius: 10px; border: 2px solid #888; margin-bottom: 10px; }
+
+        h1 { margin: 0 0 15px; font-size: 2.5em; border-bottom: 5px solid #000; padding-bottom: 10px; }
+        label { display: block; margin-top: 8px; font-weight: bold; font-size: 0.8em; text-transform: uppercase; color: #444; }
+        input, select { padding: 8px; border-radius: 5px; border: 2px solid #555; width: 100%; box-sizing: border-box; font-weight: bold; }
+
+        .btn {
+            margin-top: 15px; padding: 15px 40px; border: 4px solid #000; border-radius: 10px;
+            background: #fff; color: #000; font-weight: bold; cursor: pointer; font-size: 1.2em; transition: 0.1s;
+        }
+        .btn:hover { background: #000; color: #fff; transform: translateY(-2px); }
+        .btn-danger { border-color: #d00; color: #d00; }
+
+        #game-ui { position: absolute; top: 15px; left: 15px; pointer-events: none; z-index: 100; }
+        .badge { background: white; padding: 10px 15px; margin-bottom: 8px; border-radius: 5px; font-weight: bold; border: 3px solid #000; box-shadow: 5px 5px 0px rgba(0,0,0,0.1); }
+
+        .center-msg { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: 5em; font-weight: 900; color: white; -webkit-text-stroke: 3px black; display: none; pointer-events: none; z-index: 500; }
+        .result-row { display: flex; justify-content: space-between; padding: 10px; margin: 5px 0; border-radius: 8px; border: 2px solid #000; font-size: 1.2em; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<!-- HLAVNÍ MENU -->
+<div id="main-menu" class="overlay">
+    <div class="menu">
+        <h1>ORBIT ARENA</h1>
+        <div class="grid-layout">
+            <div>
+                <div class="setup-section">
+                    <label>Počet hráčů (2-8):</label>
+                    <input type="number" id="p-count" value="4" min="2" max="8" onchange="generatePlayerInputs()">
+                    <div id="player-inputs" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px;"></div>
+                </div>
+                <div class="setup-section">
+                    <label>Nastavení turnaje:</label>
+                    <label>Cílové skóre: <input type="number" id="cfg-target" value="5" min="1"></label>
+                    <label>Limit neaktivity pro remízu (s): <input type="number" id="cfg-draw-timer" value="15" min="0"></label>
+                </div>
+            </div>
+            <div>
+                <div class="setup-section">
+                    <label>Fyzika a Prostředí:</label>
+                    <label>Gravitace:</label>
+                    <select id="cfg-grav">
+                        <option value="down">Dolů ↓</option>
+                        <option value="up">Nahoru ↑</option>
+                        <option value="inward">Středová ⦿</option>
+                        <option value="outward">Odstředivá ⊗</option>
+                        <option value="zero">Nulová ◌</option>
+                    </select>
+                    <label>Přenášet gravitaci do dalšího kola:
+                        <select id="cfg-grav-persist">
+                            <option value="no">Ne - resetovat každé kolo</option>
+                            <option value="yes">Ano - nechat změněnou</option>
+                        </select>
+                    </label>
+                    <label>Záchytné body:</label>
+                    <select id="cfg-body-coll">
+                        <option value="no">Prostupné</option>
+                        <option value="yes">Pevné</option>
+                    </select>
+                </div>
+                <div class="setup-section">
+                    <label>Pokročilé:</label>
+                    <label>Zrychlení na laně: <input type="number" id="cfg-accel" value="0.003" step="0.001"></label>
+                    <label>Omráčení po srážce (ms): <input type="number" id="cfg-stun" value="1200"></label>
+                </div>
+            </div>
+        </div>
+        <button class="btn" onclick="startGame()">SPUSTIT TURNAJ</button>
+    </div>
+</div>
+
+<!-- ESC MENU -->
+<div id="esc-menu" class="overlay hidden">
+    <div class="menu" style="max-width: 400px; border-color: #d00;">
+        <h2>PAUZA / MENU</h2>
+        <button class="btn" onclick="toggleEsc(false)">POKRAČOVAT</button><br>
+        <button class="btn btn-danger" onclick="exitToMenu()">ODEJÍT DO MENU</button>
+    </div>
+</div>
+
+<!-- VÝSLEDKY -->
+<div id="result-menu" class="overlay hidden">
+    <div class="menu" style="max-width: 500px;">
+        <h1 id="winner-title">TURNAJ UKONČEN</h1>
+        <div id="result-list"></div>
+        <button class="btn" onclick="exitToMenu()">ZAVŘÍT</button>
+    </div>
+</div>
+
+<div id="game-ui"></div>
+<div id="status-msg" class="center-msg">REMÍZA</div>
+
+<script>
+const { Engine, Render, Runner, Bodies, Composite, Constraint, Vector, Events, Body } = Matter;
+
+let engine, render, runner, players = [], anchors = [], isStarted = false, isPaused = false, isRestarting = false;
+let winCounts = {};
+let currentGrav = 'down';
+let powerupTimer;
+let lastInteractionTime = 0;
+let drawLimit = 15;
+
+const COLORS = ['#FF4444', '#44FF44', '#4444FF', '#FFFF44', '#FF44FF', '#44FFFF', '#FFAA00', '#795548'];
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8'];
+
+function generatePlayerInputs() {
+    const cont = document.getElementById('player-inputs');
+    const n = document.getElementById('p-count').value;
+    const oldKeys = [];
+    for (let i = 0; i < 8; i++) {
+        const el = document.getElementById(`k-${i}`);
+        oldKeys.push(el ? el.value : KEYS[i]);
+    }
+    cont.innerHTML = '';
+    for (let i = 0; i < n; i++) {
+        cont.innerHTML += `<input type="text" id="k-${i}" value="${oldKeys[i]}" maxlength="1" onchange="valKey(this)" style="border-left: 10px solid ${COLORS[i]}">`;
+    }
+}
+function valKey(el) { if (el.value.toLowerCase() === 'p') el.value = '1'; }
+generatePlayerInputs();
+
+function drawArrow(ctx, x, y, dx, dy) {
+    if (dx === 0 && dy === 0) return;
+    const head = 10;
+    const angle = Math.atan2(dy, dx);
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx, y + dy);
+    ctx.lineTo(x + dx - head * Math.cos(angle - Math.PI / 6), y + dy - head * Math.sin(angle - Math.PI / 6));
+    ctx.moveTo(x + dx, y + dy);
+    ctx.lineTo(x + dx - head * Math.cos(angle + Math.PI / 6), y + dy - head * Math.sin(angle + Math.PI / 6));
+    ctx.stroke();
+}
+
+class Player {
+    constructor(id, x, y, key, color) {
+        this.id = id; this.key = key.toLowerCase(); this.color = color;
+        this.isOut = false; this.canGrab = true; this.constraint = null;
+        this.reach = 280;
+        this.body = Bodies.circle(x, y, 22, {
+            restitution: 0.9, frictionAir: 0.015,
+            render: { fillStyle: color, strokeStyle: '#000', lineWidth: 4 }
+        });
+        Composite.add(engine.world, this.body);
+        if (winCounts[this.id] === undefined) winCounts[this.id] = 0;
+    }
+
+    update() {
+        if (this.isOut || isPaused) return;
+        let f = { x: 0, y: 0 };
+        const s = 0.0008 * this.body.mass;
+        const ctr = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        if (currentGrav === 'down') f.y = s; else if (currentGrav === 'up') f.y = -s;
+        else if (currentGrav === 'inward') f = Vector.mult(Vector.normalise(Vector.sub(ctr, this.body.position)), s);
+        else if (currentGrav === 'outward') f = Vector.mult(Vector.normalise(Vector.sub(this.body.position, ctr)), s);
+        Body.applyForce(this.body, this.body.position, f);
+
+        if (this.constraint) {
+            const acc = parseFloat(document.getElementById('cfg-accel').value);
+            const diff = Vector.sub(this.body.position, this.constraint.pointB);
+            const perp = Vector.normalise({ x: -diff.y, y: diff.x });
+            const dir = Vector.dot(this.body.velocity, perp) >= 0 ? 1 : -1;
+            Body.applyForce(this.body, this.body.position, Vector.mult(perp, acc * this.body.mass * dir));
+        }
+        const p = this.body.position;
+        if (p.y < -350 || p.y > window.innerHeight + 350 || p.x < -350 || p.x > window.innerWidth + 350) this.die();
+    }
+
+    toggle() {
+        if (this.isOut || isPaused) return;
+        lastInteractionTime = Date.now();
+        if (this.constraint) { Composite.remove(engine.world, this.constraint); this.constraint = null; }
+        else if (this.canGrab) {
+            let best = null, minDist = this.reach;
+            anchors.forEach(a => {
+                const d = Vector.magnitude(Vector.sub(this.body.position, a.position));
+                if (d < minDist) { minDist = d; best = a; }
+            });
+            if (best) {
+                this.constraint = Constraint.create({
+                    bodyA: this.body, pointB: { x: best.position.x, y: best.position.y },
+                    stiffness: 0.15, length: minDist * 0.7, render: { strokeStyle: this.color, lineWidth: 5 }
+                });
+                Composite.add(engine.world, this.constraint);
+            }
+        }
+    }
+
+    die() {
+        if (this.isOut) return;
+        this.isOut = true;
+        if (this.constraint) { Composite.remove(engine.world, this.constraint); this.constraint = null; }
+        Composite.remove(engine.world, this.body);
+        updateUI(); checkEnd();
+    }
+}
+
+function startGame() {
+    isStarted = true; winCounts = {};
+    if (document.getElementById('cfg-grav-persist').value === 'no') {
+        currentGrav = document.getElementById('cfg-grav').value;
+    }
+    document.getElementById('main-menu').classList.add('hidden');
+    initMatch();
+}
+
+function initMatch() {
+    if (render) { Render.stop(render); Runner.stop(runner); render.canvas.remove(); }
+    if (powerupTimer) clearInterval(powerupTimer);
+
+    if (document.getElementById('cfg-grav-persist').value === 'no') {
+        currentGrav = document.getElementById('cfg-grav').value;
+    }
+
+    drawLimit = parseInt(document.getElementById('cfg-draw-timer').value);
+    lastInteractionTime = Date.now();
+    isRestarting = false;
+
+    engine = Engine.create(); engine.world.gravity.scale = 0;
+    render = Render.create({
+        element: document.body, engine: engine,
+        options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#dcdcdc' }
+    });
+
+    const isSolid = document.getElementById('cfg-body-coll').value === 'yes';
+    anchors = []; const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+    for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const b = Bodies.circle(cx + Math.cos(a) * 300, cy + Math.sin(a) * 300, 12, { isStatic: true, isSensor: !isSolid, render: { fillStyle: '#000' } });
+        anchors.push(b); Composite.add(engine.world, b);
+    }
+
+    const n = parseInt(document.getElementById('p-count').value);
+    players = [];
+    for (let i = 0; i < n; i++) {
+        const a = anchors[i];
+        const p = new Player(i, a.position.x, a.position.y + 90, document.getElementById(`k-${i}`).value, COLORS[i]);
+        players.push(p); p.toggle();
+    }
+
+    Events.on(engine, 'beforeUpdate', () => {
+        players.forEach(p => p.update());
+        // Kontrola remízy
+        if (drawLimit > 0 && (Date.now() - lastInteractionTime) > drawLimit * 1000 && !isRestarting) {
+            isRestarting = true;
+            document.getElementById('status-msg').innerText = "REMÍZA";
+            document.getElementById('status-msg').style.display = "block";
+            setTimeout(() => { document.getElementById('status-msg').style.display = "none"; initMatch(); }, 2000);
+        }
+    });
+
+    Events.on(render, 'afterRender', () => {
+        const ctx = render.context; ctx.strokeStyle = '#00000018'; ctx.lineWidth = 3;
+        for (let x = 100; x < window.innerWidth; x += 150) {
+            for (let y = 100; y < window.innerHeight; y += 150) {
+                let dx = 0, dy = 0;
+                if (currentGrav === 'down') dy = 20; else if (currentGrav === 'up') dy = -20;
+                else if (currentGrav === 'inward') { const v = Vector.normalise(Vector.sub({ x: cx, y: cy }, { x, y })); dx = v.x * 20; dy = v.y * 20; }
+                else if (currentGrav === 'outward') { const v = Vector.normalise(Vector.sub({ x, y }, { x: cx, y: cy })); dx = v.x * 20; dy = v.y * 20; }
+                drawArrow(ctx, x, y, dx, dy);
+            }
+        }
+        players.forEach(p => {
+            if (!p.isOut && !p.constraint) {
+                ctx.beginPath(); ctx.arc(p.body.position.x, p.body.position.y, p.reach, 0, Math.PI * 2);
+                ctx.strokeStyle = p.color + '25'; ctx.setLineDash([10, 10]); ctx.stroke(); ctx.setLineDash([]);
+            }
+        });
+    });
+
+    Events.on(engine, 'collisionStart', (e) => {
+        e.pairs.forEach(pair => {
+            if (pair.bodyA.label === 'pwr' || pair.bodyB.label === 'pwr') {
+                const pwr = pair.bodyA.label === 'pwr' ? pair.bodyA : pair.bodyB;
+                const pl = players.find(p => p.body === (pair.bodyA === pwr ? pair.bodyB : pair.bodyA));
+                if (pl) {
+                    if (pwr.plugin.type === 'G') currentGrav = ['down', 'up', 'inward', 'outward', 'zero'][Math.floor(Math.random() * 5)];
+                    if (pwr.plugin.type === 'S+') Body.scale(pl.body, 1.5, 1.5);
+                    if (pwr.plugin.type === 'S-') players.filter(o => o !== pl).forEach(o => Body.scale(o.body, 0.7, 0.7));
+                    Composite.remove(engine.world, pwr);
+                }
+            } else {
+                const p1 = players.find(p => p.body === pair.bodyA);
+                const p2 = players.find(p => p.body === pair.bodyB);
+                if (p1 && p2) {
+                    const stun = parseInt(document.getElementById('cfg-stun').value);
+                    [p1, p2].forEach(p => { p.canGrab = false; p.body.render.opacity = 0.4; if (p.constraint) p.toggle(); setTimeout(() => { if (!p.isOut) { p.canGrab = true; p.body.render.opacity = 1; } }, stun); });
+                }
+            }
+        });
+    });
+
+    powerupTimer = setInterval(spawnPowerup, 6000);
+    updateUI(); Render.run(render); runner = Runner.create(); Runner.run(runner, engine);
+}
+
+function spawnPowerup() {
+    if (!isStarted || isPaused || isRestarting) return;
+    const a = anchors[Math.floor(Math.random() * anchors.length)];
+    const dist = Math.random() * 250, ang = Math.random() * Math.PI * 2;
+    const types = ['G', 'S+', 'S-'], t = types[Math.floor(Math.random() * 3)], cols = { 'G': '#FF0', 'S+': '#0F0', 'S-': '#F0F' };
+    const p = Bodies.circle(a.position.x + Math.cos(ang) * dist, a.position.y + Math.sin(ang) * dist, 20, { isSensor: true, label: 'pwr', plugin: { type: t }, render: { fillStyle: cols[t], strokeStyle: '#000', lineWidth: 3 } });
+    Composite.add(engine.world, p); setTimeout(() => Composite.remove(engine.world, p), 8000);
+}
+
+function updateUI() {
+    const ui = document.getElementById('game-ui');
+    ui.innerHTML = players.map(p => `<div class="badge" style="border-left-color: ${p.color}; opacity:${p.isOut ? 0.3 : 1}">${p.key.toUpperCase()} | Výhry: ${winCounts[p.id]}</div>`).join('');
+}
+
+function checkEnd() {
+    const alive = players.filter(p => !p.isOut);
+    if (alive.length <= 1 && !isRestarting) {
+        isRestarting = true;
+        let winnerId = alive.length === 1 ? alive[0].id : null;
+        if (winnerId !== null) winCounts[winnerId]++;
+
+        setTimeout(() => {
+            if (winnerId !== null && winCounts[winnerId] >= parseInt(document.getElementById('cfg-target').value)) {
+                showResults(winnerId);
+            } else {
+                initMatch();
+            }
+        }, 1500);
+    }
+}
+
+function showResults(winnerId) {
+    isStarted = false; Render.stop(render); Runner.stop(runner); if (powerupTimer) clearInterval(powerupTimer);
+    document.getElementById('result-menu').classList.remove('hidden');
+    document.getElementById('winner-title').innerText = `VÍTĚZEM JE HRÁČ ${winnerId + 1}`;
+    document.getElementById('winner-title').style.color = COLORS[winnerId];
+    const list = document.getElementById('result-list');
+    list.innerHTML = players.map(p => `<div class="result-row" style="background:${p.color}22; border-color:${p.color}"><span>Hráč ${p.id + 1}</span><span>${winCounts[p.id]} výher</span></div>`).join('');
+}
+
+function exitToMenu() {
+    isStarted = false; isPaused = false; isRestarting = false;
+    if (render) Render.stop(render); if (runner) Runner.stop(runner);
+    if (powerupTimer) clearInterval(powerupTimer);
+    if (render && render.canvas) render.canvas.remove();
+    document.getElementById('esc-menu').classList.add('hidden');
+    document.getElementById('result-menu').classList.add('hidden');
+    document.getElementById('main-menu').classList.remove('hidden');
+    document.getElementById('status-msg').style.display = 'none';
+}
+
+window.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (k === 'p' && isStarted) { isPaused = !isPaused; document.getElementById('status-msg').innerText = "PAUZA"; document.getElementById('status-msg').style.display = isPaused ? 'block' : 'none'; if (isPaused) Runner.stop(runner); else Runner.run(runner, engine); }
+    if (k === 'escape' && isStarted) { if (!isPaused) { isPaused = true; Runner.stop(runner); document.getElementById('status-msg').innerText = "PAUZA"; document.getElementById('status-msg').style.display = 'block'; } document.getElementById('esc-menu').classList.toggle('hidden'); }
+    if (!isPaused) players.forEach(p => { if (k === p.key) p.toggle(); });
+});
+
+function toggleEsc(show) {
+    document.getElementById('esc-menu').classList.toggle('hidden', !show);
+    if (!show && isPaused) { isPaused = false; Runner.run(runner, engine); document.getElementById('status-msg').style.display = 'none'; }
+}
+</script>
+</body>
+</html>
